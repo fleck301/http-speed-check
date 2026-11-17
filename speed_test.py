@@ -3,6 +3,7 @@
 
 import argparse
 from http.client import HTTPException
+from statistics import median
 import sys
 from time import perf_counter
 from urllib.error import HTTPError
@@ -34,6 +35,26 @@ def download(request: Request) -> tuple[int, float]:
     return byte_count, perf_counter() - started
 
 
+def print_report(downloads: list[tuple[int, float]]) -> None:
+    print(f"{'Запрос':>6}  {'Байт':>14}  {'Время, мс':>12}")
+    print(f"{'------':>6}  {'--------------':>14}  {'------------':>12}")
+    for index, (byte_count, elapsed) in enumerate(downloads, start=1):
+        size = f"{byte_count:,}".replace(",", " ")
+        print(f"{index:>6}  {size:>14}  {elapsed * 1000:>12.2f}")
+
+    durations = [elapsed for _, elapsed in downloads]
+    total_seconds = sum(durations)
+    total_bytes = sum(byte_count for byte_count, _ in downloads)
+    speed_mbps = total_bytes * 8 / total_seconds / 1_000_000
+
+    print()
+    print(f"Запросов выполнено:     {len(downloads)}")
+    print(f"Среднее время запроса: {total_seconds / len(downloads) * 1000:.2f} мс")
+    print(f"Медиана времени:       {median(durations) * 1000:.2f} мс")
+    print(f"Скачано всего:         {total_bytes:,} байт".replace(",", " "))
+    print(f"Скорость скачивания:   {speed_mbps:.2f} Мбит/с")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url", metavar="URL", help="HTTP(S)-адрес файла")
@@ -46,12 +67,11 @@ def main() -> int:
         parser.error("укажи полный URL, начинающийся с http:// или https://")
 
     request = Request(args.url, headers={"Accept-Encoding": "identity"}, method="GET")
-    total_bytes = 0
-    total_seconds = 0.0
+    downloads = []
 
     for index in range(1, REQUEST_COUNT + 1):
         try:
-            byte_count, seconds = download(request)
+            downloads.append(download(request))
         except HTTPError as error:
             error.close()
             print(f"Запрос {index}/{REQUEST_COUNT}: HTTP {error.code}.", file=sys.stderr)
@@ -59,13 +79,8 @@ def main() -> int:
         except (OSError, HTTPException, ValueError) as error:
             print(f"Запрос {index}/{REQUEST_COUNT}: {error}", file=sys.stderr)
             return 1
-        total_bytes += byte_count
-        total_seconds += seconds
 
-    print(f"Запросов выполнено:     {REQUEST_COUNT}")
-    print(f"Среднее время запроса: {total_seconds / REQUEST_COUNT * 1000:.2f} мс")
-    print(f"Скачано всего:         {total_bytes:,} байт".replace(",", " "))
-    print(f"Скорость скачивания:   {total_bytes * 8 / total_seconds / 1_000_000:.2f} Мбит/с")
+    print_report(downloads)
     return 0
 
 
